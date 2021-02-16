@@ -73,13 +73,16 @@ setup(
 
         # Bam processing:
         'singlecellmultiomics/bamProcessing/bamTabulator.py',
+        'singlecellmultiomics/bamProcessing/bamToNucleosomePositions.py',
         'singlecellmultiomics/bamProcessing/bamAnalyzeCutDistances.py',
         'singlecellmultiomics/bamProcessing/bamSplitByTag.py',
         'singlecellmultiomics/bamProcessing/bamReadGroupFormat.py',
         'singlecellmultiomics/bamProcessing/bamToCountTable.py',
         'singlecellmultiomics/bamProcessing/bamCopyNumber.py',
         'singlecellmultiomics/bamProcessing/bamExtractSamples.py',
+        'singlecellmultiomics/bamProcessing/scmoConvert.py',
         'singlecellmultiomics/bamProcessing/bamToMethylationAndCopyNumber.py',
+        'singlecellmultiomics/bamProcessing/bamDinucleotideDistribution.py',
         'singlecellmultiomics/bamProcessing/bamToMethylationCalls.py',
         'singlecellmultiomics/bamProcessing/bamMappingRate.py',
         'singlecellmultiomics/bamProcessing/bamFilter.py',
@@ -97,6 +100,7 @@ setup(
         'singlecellmultiomics/bamProcessing/bamExtractVariants.py',
         'singlecellmultiomics/bamProcessing/bamMatchGATKBQSRReport.py',
         'singlecellmultiomics/bamProcessing/bamBinCounts.py',
+        'singlecellmultiomics/bamProcessing/bamExtractNearMolecules.py',
         'singlecellmultiomics/bamProcessing/split_double_BAM.py',
         'singlecellmultiomics/bamProcessing/bamOverseq.py',
         'singlecellmultiomics/bamProcessing/plotRegion.py',
@@ -136,7 +140,7 @@ setup(
         ],
 
   install_requires=[
-       'pysam>=0.15.3','numpy>=1.16.1','pandas>=0.25.0','colorama','pyBigWig',
+       'pysam>=0.15.3','numpy>=1.16.5','pandas>=0.25.0','colorama','pyBigWig',
        'cutadapt>=2.9',
        'pysamiterators>=1.8','more-itertools','matplotlib','tabulate',
        'wheel','setuptools>=40.8.0','scikit-learn>=0.21.3','seaborn>=0.11.0', 'statsmodels', 'cached_property',

@@ -6,7 +6,9 @@ import pysamiterators
 import pysam
 import argparse
 import singlecellmultiomics.bamProcessing.bamFunctions as bf
+from singlecellmultiomics.features import FeatureContainer
 import os
+from singlecellmultiomics.alleleTools import AlleleResolver
 
 
 def finish_bam(output, args, temp_out):
@@ -41,6 +43,13 @@ if __name__ == '__main__':
         type=int,
         help='Tabulate the first N valid molecules')
 
+
+    argparser.add_argument(
+        '-features',
+        type=str,
+        help='Annotate cut locations with these features, path to gtf file')
+
+
     argparser.add_argument(
         '-min_phred_score',
         type=int,
@@ -50,34 +59,34 @@ if __name__ == '__main__':
     argparser.add_argument(
         '-dove_R1_distance',
         type=int,
-        help='Do not call methylation N bases form the end of R1',default=2)
+        help='Do not call methylation N bases form the end of R1',default=8)
 
     argparser.add_argument(
         '-dove_R2_distance',
         type=int,
-        help='Do not call methylation N bases form the end of R2',default=2)
+        help='Do not call methylation N bases form the end of R2',default=8)
 
     argparser.add_argument(
         '-skip_last_n_cycles_R1',
         type=int,
-        help='Do not call methylation N bases form the end of R1',default=2)
+        help='Do not call methylation N bases form the end of R1',default=5)
 
 
 
     argparser.add_argument(
         '-skip_first_n_cycles_R1',
         type=int,
-        help='Do not call methylation N bases form the start of R1',default=2)
+        help='Do not call methylation N bases form the start of R1',default=5)
 
     argparser.add_argument(
         '-skip_last_n_cycles_R2',
         type=int,
-        help='Do not call methylation N bases form the end of R2',default=2)
+        help='Do not call methylation N bases form the end of R2',default=5)
 
     argparser.add_argument(
         '-skip_first_n_cycles_R2',
         type=int,
-        help='Do not call methylation N bases form the start of R2',default=2)
+        help='Do not call methylation N bases form the start of R2',default=5)
 
 
     argparser.add_argument('-minmq', type=int, default=50)
@@ -116,6 +125,37 @@ if __name__ == '__main__':
         '-bamout',
         type=str,
         help="optional (tagged) output BAM path")
+    argparser.add_argument(
+        '--allow_single_end',
+        action='store_true',
+        help='Allow single end reads')
+
+    allele_gr = argparser.add_argument_group('alleles')
+    allele_gr.add_argument('-alleles', type=str, help="Phased allele file (VCF)")
+    allele_gr.add_argument(
+        '-allele_samples',
+        type=str,
+        help="Comma separated samples to extract from the VCF file. For example B6,SPRET")
+    allele_gr.add_argument(
+        '-unphased_alleles',
+        type=str,
+        help="Unphased allele file (VCF)")
+    allele_gr.add_argument(
+        '--haplo_molecule_assignment',
+        action='store_true',
+        help='Take allele information into account during molecule assignment ')
+
+    allele_gr.add_argument(
+    '--set_allele_resolver_verbose',
+    action='store_true',
+    help='Makes the allele resolver print more')
+    allele_gr.add_argument(
+        '--use_allele_cache',
+        action='store_true',
+        help='''Write and use a cache file for the allele information. NOTE: THIS IS NOT THREAD SAFE! Meaning you should not use this function on multiple libraries at the same time when the cache files are not yet available.
+            Once they are available there is not thread safety issue anymore''')
+
+
     args = argparser.parse_args()
     alignments = pysam.AlignmentFile(args.alignmentfile)
 
@@ -138,9 +178,21 @@ if __name__ == '__main__':
     reference = pysamiterators.iterators.CachedFasta(pysam.FastaFile(args.ref))
     taps = singlecellmultiomics.molecule.TAPS()
 
+    if args.features is not None:
+        features = FeatureContainer()
+        features.loadGTF(args.features,thirdOnly='gene',store_all=True)
+    else:
+        features = None
+
+    fragment_class_args={'umi_hamming_distance': 1,
+                         'no_umi_cigar_processing':False}
+
+
+
     molecule_class_args = {
         'reference': reference,
         'taps': taps,
+        'taps_strand':'R',
         'min_max_mapping_quality': args.minmq
     }
     if args.method == 'nla':
@@ -165,6 +217,23 @@ if __name__ == '__main__':
         'min_phred_score':args.min_phred_score
         }
 
+
+    ignore_conversions = set([('C', 'T'), ('G', 'A')])
+    if args.alleles is not None and args.alleles!='none':
+        molecule_class_args['allele_resolver'] = AlleleResolver(
+            args.alleles,
+            select_samples=args.allele_samples.split(',') if args.allele_samples is not None else None,
+            lazyLoad=True,
+            use_cache=args.use_allele_cache,
+            verbose = args.set_allele_resolver_verbose,
+            ignore_conversions=ignore_conversions)
+    ar = molecule_class_args.get('allele_resolver')
+
+    if args.allow_single_end:
+        # Single end base calls are "unsafe", allow them :
+        molecule_class_args['allow_unsafe_base_calls'] = True
+        fragment_class_args['single_end'] = True
+
     s = args.moleculeNameSep
     try:
         for i, molecule in enumerate(singlecellmultiomics.molecule.MoleculeIterator(
@@ -173,13 +242,10 @@ if __name__ == '__main__':
             yield_invalid=(output is not None),
             every_fragment_as_molecule=args.every_fragment_as_molecule,
             fragment_class=fragment_class,
-            fragment_class_args={'umi_hamming_distance': 1,
-                                 'no_umi_cigar_processing':True,
-
-                                 },
-
-                molecule_class_args=molecule_class_args,
-                contig=args.contig)):
+            fragment_class_args=fragment_class_args,
+            perform_allele_clustering = args.haplo_molecule_assignment and molecule_class_args.get('allele_resolver', None) is not None,
+            molecule_class_args=molecule_class_args,
+            contig=args.contig)):
 
             molecule.set_meta('mi',i)
             if args.head and (i - 1) >= args.head:
@@ -200,7 +266,27 @@ if __name__ == '__main__':
             if args.fmt == "table_more":
                 consensus = molecule.get_consensus()
 
-            CUT_SITE = molecule.get_cut_site()[1]
+            cut_contig,CUT_SITE,cut_strand = molecule.get_cut_site()
+
+
+            if features is not None:
+                features.findFeaturesAt(cut_contig, CUT_SITE)
+                genes = []
+                for hit_start,hit_end,gene,strand,meta in features.findFeaturesAt(cut_contig, CUT_SITE):
+                    g = dict(meta).get('gene_name',gene)
+                    genes.append(g)
+                additional=f"\t{','.join(genes)}"
+
+            else:
+                additional = ""
+
+            if ar is not None: # Allele resolver is defined
+                allele = molecule.allele
+                if allele is not None:
+                    additional+=f'\t{allele}'
+                else:
+                    additional+=f'\tnone'
+
 
             for (chromosome, location), call in molecule.methylation_call_dict.items():
                 if call['context'] == '.':  # Only print calls concerning C's
@@ -213,7 +299,7 @@ if __name__ == '__main__':
                 if args.fmt == "table":
 
                     print(
-                        f"{molecule.sample}{s}{i}{s}{CUT_SITE}{s}{molecule.span_len}{s}{molecule.umi}{s}{molecule.get_strand_repr()}\t{chromosome}\t{location+1}\t{call['context']}")
+                        f"{molecule.sample}{s}{i}{s}{CUT_SITE}{s}{molecule.estimated_max_length}{s}{molecule.umi}{s}{molecule.get_strand_repr()}\t{chromosome}\t{location+1}\t{call['context']}\t{molecule.ligation_motif}{additional}")
 
                 elif args.fmt == "table_more":
 

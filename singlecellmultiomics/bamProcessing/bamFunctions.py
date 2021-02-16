@@ -81,6 +81,31 @@ def get_r1_counts_per_cell(bam_path, prefix_with_bam=False):
     return cell_obs
 
 
+def get_contigs(bam: str)  -> Generator :
+    """
+    Get all contigs listed in the bam file header
+
+    Args:
+        bam_path(str): path to bam file or pysam handle
+
+
+    Returns:
+        contigs(str) list
+
+    """
+
+    if type(bam) is str:
+        with pysam.AlignmentFile(bam) as a:
+            references = a.references
+        return references
+    elif type(bam) is pysam.AlignmentFile:
+        return bam.references
+
+    raise ValueError('Supply either path to bam or pysam.AlignmentFile')
+
+
+
+
 def get_contigs_with_reads(bam_path: str, with_length: bool = False)  -> Generator :
     """
     Get all contigs with reads mapped to them
@@ -176,7 +201,7 @@ def verify_and_fix_bam(bam_path):
                 index_missing = True
 
         if index_missing:
-            print(f"The bam file {bam_path} has an older index, attempting an index re-build ..")
+            print(f"The bam file {bam_path} has no or an older index, attempting an index re-build ..")
             pysam.index(bam_path)
             print(f"Succes!")
 

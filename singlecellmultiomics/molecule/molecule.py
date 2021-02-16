@@ -547,6 +547,7 @@ class Molecule():
                         read.is_duplicate = True
 
         # Write RT reaction tags (rt: rt reaction index, rd rt duplicate index)
+        # This is only required for fragments which have defined random primers
         rt_reaction_index = None
         for rt_reaction_index, ( (contig, random_primer_start, random_primer_sequence), frags) in enumerate(
                 self.get_rt_reactions().items()):
@@ -1672,6 +1673,41 @@ class Molecule():
         else:
             return None
 
+    @property
+    def is_completely_matching(self) -> bool:
+        """
+        Checks if all associated reads are completely mapped:
+        checks if all cigar operations are M,
+        Returns True when all cigar operations are M, False otherwise
+        """
+
+        return all(
+                (
+                     all(
+                     [ (operation==0)
+                        for operation, amount in read.cigartuples] )
+                for read in self.iter_reads()))
+
+
+    @property
+    def estimated_max_length(self) -> int:
+        """
+        Obtain the estimated size of the fragment,
+        returns None when estimation is not possible
+        Takes into account removed bases (R2)
+        Assumes inwards sequencing orientation
+        """
+        max_size = None
+        for frag in self:
+            r = frag.estimated_length
+            if r is None :
+                continue
+            if max_size is None:
+                max_size = r
+            elif r>max_size:
+                max_size = r
+        return max_size
+
     def get_safely_aligned_length(self):
         """Get the amount of safely aligned bases (excludes primers)
         Returns:
@@ -1685,6 +1721,9 @@ class Molecule():
         end = None
         contig = None
         for fragment in self:
+            if not fragment.safe_span:
+                continue
+
             if contig is None:
                 contig = fragment.span[0]
             if contig == fragment.span[0]:
@@ -1696,6 +1735,8 @@ class Molecule():
                     start = min(f_start, start)
                     end = min(f_end, end)
 
+        if end is None:
+            raise ValueError('Not safe')
         return abs(end - start)
 
     def add_fragment(self, fragment, use_hash=True):
@@ -1753,7 +1794,7 @@ class Molecule():
                        self.cache_size *
                        0.5)
 
-    def get_rt_reactions(self):
+    def get_rt_reactions(self) -> dict:
         """Obtain RT reaction dictionary
 
         returns:
@@ -1800,17 +1841,24 @@ class Molecule():
             self.get_rt_reaction_fragment_sizes()
         )
 
-    def write_pysam(self, target_file, consensus=False, no_source_reads=False, consensus_name=None):
+    def write_pysam(self, target_file, consensus=False, no_source_reads=False, consensus_name=None, consensus_read_callback=None, consensus_read_callback_kwargs=None):
         """Write all associated reads to the target file
 
         Args:
             target_file (pysam.AlignmentFile) : Target file
             consensus (bool) : write consensus
             no_source_reads (bool) : while in consensus mode, don't write original reads
+            consensus_read_callback (function) : this function is called with every consensus read as an arguments
+            consensus_read_callback_kwargs (dict) : arguments to pass to the callback function
         """
         if consensus:
             reads = self.deduplicate_majority(target_file,
                                               f'molecule_{uuid4()}' if consensus_name is None else consensus_name)
+            if consensus_read_callback is not None:
+                if consensus_read_callback_kwargs is not None:
+                    consensus_read_callback(reads, **consensus_read_callback_kwargs)
+                else:
+                    consensus_read_callback(reads)
 
             for read in reads:
                 target_file.write(read)
@@ -2940,3 +2988,18 @@ class Molecule():
                                     read.reference_name, rpos)] = -1
                     i += 1
         return methylated_positions, methylated_state
+
+
+    def _get_allele_from_reads(self) -> str:
+        """
+        Obtain associated allele based on the associated reads of the molecule
+
+        """
+        allele = None
+        for frag in self:
+            for read in frag:
+                if read is None or not read.has_tag('DA'):
+                    continue
+                allele = read.get_tag('DA')
+                return allele
+        return None
